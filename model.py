@@ -79,7 +79,7 @@ class GazeTrackingDataset(Dataset):
         return image, label
     
 
-gaze_dataset = GazeTrackingDataset("../../gaze-dataset/Data/Normalized")
+gaze_dataset = GazeTrackingDataset("./gaze-dataset/Data/Normalized")
 gaze_dataloader = DataLoader(gaze_dataset, batch_size=32)
 
 gaze_img, _ = next(iter(gaze_dataloader))

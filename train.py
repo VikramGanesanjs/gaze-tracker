@@ -11,6 +11,7 @@ from tqdm import tqdm
 import mediapipe as mp
 import matplotlib.pyplot as plt
 import argparse
+import torch.nn.functional as F
 
 #TODO: Add Arg Parser to allow for changing hyperparameters in the command line
 parser = argparse.ArgumentParser()
@@ -33,7 +34,7 @@ loss_dict = {
     'huber': nn.HuberLoss(),
 }
 args = parser.parse_args()
-net = GazePredictor()
+net = GazePredictor().to(mps_device)
 loss_fn = loss_dict[args.loss]
 epochs = args.max_iter
 lr = args.lr
@@ -48,12 +49,15 @@ transform = transforms.Compose([
         transforms.Resize((444, 250)),
         transforms.CenterCrop(224), 
         transforms.ToTensor(), 
+        transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])
     ])
 
 # Face Mesh Setup
 mp_face_mesh = mp.solutions.face_mesh
 
-root_data_dir = "../../gaze-dataset/images"
+
+
+root_data_dir = "../images"
 tablet_gaze_data = datasets.ImageFolder(root_data_dir, transform=transform)
 dataloader = data.DataLoader(tablet_gaze_data, batch_size=batch_size, shuffle=True)
 class_to_idx = tablet_gaze_data.class_to_idx
@@ -65,6 +69,9 @@ def cosine_decay(optimizer, global_step, max_steps, initial_lr, final_lr=0.0):
     for param_group in optimizer.param_groups:
         param_group['lr'] = decay
 
+
+
+
 def convert_label(label_idxs):
     label_arr = []
     for label_idx in label_idxs:
@@ -72,7 +79,8 @@ def convert_label(label_idxs):
         x, y = float(raw_label[0]), float(raw_label[1])
         label_i = (x, y)
         label_arr.append(label_i)
-    return torch.tensor(label_arr)
+    # Normalize labels by dividing them by the max value
+    return torch.tensor(label_arr) / torch.tensor((21.52, 13.49))
 
 def get_face_landmarks(image):
     landmarks = []
@@ -102,22 +110,26 @@ def get_face_landmarks(image):
 def train():
     epochs_arr = []
     losses = []
-
-    for epoch in tqdm(range(epochs)):
-        epochs_arr.append(epoch)
-        image, label_idxs = next(iter(dataloader))
-        label = convert_label(label_idxs)
-        landmarks = get_face_landmarks(image)
-        landmarks = landmarks.view(batch_size, 3, 478)
-        y_pred = net(image, landmarks.float())
-        loss = loss_fn(y_pred, label)
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-        # cosine_decay(optimizer, epoch, epochs, lr)
-        scheduler.step()
-        losses.append(loss.item())
-        print("Epoch:{} y_pred:{:.6f}, {:.6f} label: {:.6f}, {:.6f} loss: {:.6f}".format(epoch, y_pred[0][0].item(), y_pred[0][1].item(), label[0][0].item(), label[0][1].item(), loss))
+    try:
+        for epoch in tqdm(range(epochs)):
+            epochs_arr.append(epoch)
+            image, label_idxs = next(iter(dataloader))
+            label = convert_label(label_idxs).to(mps_device)
+            landmarks = get_face_landmarks(image)
+            landmarks = landmarks.view(batch_size, 3, 478).to(mps_device)
+            y_pred = net(image.to(mps_device), landmarks.float())
+            y_pred_denormalized = y_pred * torch.tensor((21.52, 13.49)).to(mps_device)
+            label_denormalized = label * torch.tensor((21.52, 13.49)).to(mps_device)
+            loss = loss_fn(y_pred, label)
+            loss_denormalized = loss_fn(y_pred_denormalized, label_denormalized)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            scheduler.step()
+            losses.append(loss.item())
+            print("Epoch:{} y_pred:{:.6f}, {:.6f} label: {:.6f}, {:.6f} loss: {:.6f}, denorm {:.6f}".format(epoch, y_pred[0][0].item(), y_pred[0][1].item(), label[0][0].item(), label[0][1].item(), loss, loss_denormalized))
+    except KeyboardInterrupt:
+        return epochs_arr, losses
     return epochs_arr, losses
 
 def average(arr):
@@ -125,22 +137,40 @@ def average(arr):
     for el in arr:
         sum += el
     return sum / len(arr)
+def euclidean_distance(x, y):
+    return torch.sqrt(torch.sum((x - y) ** 2))
+
+def avg_euclidean_distance(preds, labels):
+    sum = 0
+    for i,  j, in zip(preds, labels):
+        sum += loss_fn(i, j).sqrt()
+    return sum / len(preds)
+
+
 
 def test():
     losses = []
     epochs_arr = []
+    preds = []
+    labels = []
     batch_size = 1
-    for i in tqdm(range(int(args.test_size))):
-        epochs_arr.append(i)
-        test_dataloader = data.DataLoader(tablet_gaze_data, batch_size=batch_size, shuffle=True)
-        image, label_idxs = next(iter(test_dataloader))
-        label = convert_label(label_idxs)
-        landmarks = get_face_landmarks(image).to(dtype=torch.float32)
-        landmarks = landmarks.view(batch_size, 3, 478)
-        y_pred = net(image, landmarks)
-        loss = loss_fn(y_pred, label)
-        losses.append(loss.item())
-    return losses, epochs_arr, average(losses)
+    try:
+        for i in tqdm(range(int(args.test_size))):
+            epochs_arr.append(i)
+            test_dataloader = data.DataLoader(tablet_gaze_data, batch_size=batch_size, shuffle=True)
+            image, label_idxs = next(iter(test_dataloader))
+            label = convert_label(label_idxs).to(mps_device)
+            landmarks = get_face_landmarks(image).to(mps_device, dtype=torch.float32)
+            landmarks = landmarks.view(batch_size, 3, 478)
+            y_pred = net(image.to(mps_device), landmarks)
+            loss = loss_fn(y_pred, label)
+            preds.append(y_pred * torch.tensor((21.52, 13.49)).to(mps_device))
+            labels.append(label * torch.tensor((21.52, 13.49)).to(mps_device))
+            
+            losses.append(loss.item())
+    except KeyboardInterrupt:
+        return losses, epochs_arr, average(losses), avg_euclidean_distance(preds, labels).item()
+    return losses, epochs_arr, average(losses), avg_euclidean_distance(preds, labels).item()
 
 def save():
     torch.save({
@@ -151,15 +181,20 @@ def save():
 
 def main():
     epochs_arr, losses = train()
-    test_losses, test_epochs, error = test()
+    test_losses, test_epochs, error, aed = test()
     save()
-    print(error)
-    plt.plot(epochs_arr, losses)
-    plt.show()
-    plt.plot(test_epochs, test_losses)
-    plt.show()
-    print("training losses", losses)
-    print("test losses", test_losses)
-
+    print("Error:", error)
+    print("AED: ", aed)
+    if(len(epochs_arr) == len(losses)):
+        plt.plot(epochs_arr, losses)
+        plt.show()
+        plt.plot(test_epochs, test_losses)
+        plt.show()
+    else:
+        epochs_arr.pop()
+        plt.plot(epochs_arr, losses)
+        plt.show()
+        plt.plot(test_epochs, test_losses)
+        plt.show() 
 if __name__ == "__main__":
     main()

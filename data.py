@@ -56,7 +56,7 @@ class TabletGaze(data.Dataset):
                     label = (self.gaze_pts_data[2][0][i], self.gaze_pts_data[3][0][i])
                     print(label)
                     res.append([video_frames[j], label])
-                    directory = "../../gaze-dataset/images/{}_{}".format(label[0], label[1])
+                    directory = "./images/{}_{}".format(label[0], label[1])
                     if not os.path.exists(directory):
                         os.makedirs(directory)
                     fig = plt.figure(frameon=False)
@@ -65,7 +65,7 @@ class TabletGaze(data.Dataset):
                     ax.set_axis_off()
                     fig.add_axes(ax)
                     ax.imshow(self.pil_transform(video_frames[j]), aspect="auto")
-                    fig.savefig("../../gaze-dataset/images/{}_{}/{}_{}_{}_{}_{}".format(label[0], label[1], ids[0], ids[1], ids[2], i, j), dpi=80)
+                    fig.savefig("./images/{}_{}/{}_{}_{}_{}_{}".format(label[0], label[1], ids[0], ids[1], ids[2], i, j), dpi=80)
                     plt.close()
 
         return res
@@ -141,7 +141,7 @@ def main():
         transforms.CenterCrop(224), 
         transforms.ToTensor(), 
     ])
-    dataset = TabletGaze("../../gaze-dataset", "../../gaze-dataset/data", "../../gaze-dataset/labels", transform=transform)
+    dataset = TabletGaze("./gaze-dataset", "./gaze-dataset/data", "./gaze-dataset/labels", transform=transform)
 
     dataloader = data.DataLoader(dataset, shuffle=True)
     image, label = next(iter(dataloader))

@@ -5,7 +5,7 @@ mp_drawing_styles = mp.solutions.drawing_styles
 mp_face_mesh = mp.solutions.face_mesh
 
 # For static images:
-IMAGE_FILES = ["../../gaze-dataset/images/21.52_13.49/12_2_1_7_652.png"]
+IMAGE_FILES = ["./images/21.52_13.49/12_2_1_7_652.png"]
 drawing_spec = mp_drawing.DrawingSpec(thickness=1, circle_radius=1)
 with mp_face_mesh.FaceMesh(
     static_image_mode=True,
