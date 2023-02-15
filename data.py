@@ -7,6 +7,7 @@ import os
 from tqdm import tqdm
 import torchvision.transforms as transforms
 import torch.multiprocessing as mp
+import json
 """
 Start Times is an array of length 51, 1 for each subject. In each of these arrays is another array of length 4. 
 This represents the Trial ID. These arrays contain another of length four, for the posture ID.
@@ -133,6 +134,7 @@ class TabletGaze(data.Dataset):
         return len(self.images)
 
 
+
 def main():
     torchvision.set_video_backend('video_reader')
     transform = transforms.Compose([
@@ -149,6 +151,7 @@ def main():
     print(label)
     plt.imshow(image.permute(1, 2, 0))
     plt.show()
+    gaze_capture = GazeCapture("../gaze-capture")
 
 if __name__ == "__main__":
     print(mp.get_sharing_strategy())
