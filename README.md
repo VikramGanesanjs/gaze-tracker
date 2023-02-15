@@ -13,6 +13,7 @@
 #### data.py - Preprocessing of tablet-gaze dataset
 #### gaze_capture_setup.py - Preprocessing of gaze-capture dataset
 #### vgg.py - VGG-16 architecture that can be used for fine tuning
+#### vgg_normalized.pth - PyTorch Model state dict for pretrained VGG-16 model that can be used for fine tuning
 #### All other files should be disregarded as they are just demos or test files
 
 # Slideshow Presentation
