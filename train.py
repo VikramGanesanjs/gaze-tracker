@@ -24,7 +24,10 @@ parser.add_argument('--loss', type=str, choices=['mse', 'l1', 'cross_entropy', '
 parser.add_argument('--lr_decay_epochs', type=int, default=2500)
 parser.add_argument('--lr_decay_gamma', type=float, default=0.1)
 parser.add_argument('--use_vgg', type=bool, default=False)
+parser.add_argument('--use_tablet_gaze_fine_tune', type=bool, default=False)
 parser.add_argument('--use_gaze_capture', type=bool, default=False)
+parser.add_argument('--saved_model_path', type=str, default='../saved-models/gaze_tracker_saved_2_6_BEST.pth')
+parser.add_argument('--use_orientation', type=bool, default=False)
 
 mps_device = torch.device("mps")
 
@@ -36,7 +39,9 @@ loss_dict = {
     'huber': nn.HuberLoss(),
 }
 args = parser.parse_args()
-net = GazePredictor(args.use_vgg).to(mps_device)
+net = GazePredictor(args.use_vgg, args.use_orientation).to(mps_device)
+if args.use_tablet_gaze_fine_tune:
+    net.load_state_dict(torch.load(args.saved_model_path)['model_state_dict'])
 loss_fn = loss_dict[args.loss]
 epochs = args.max_iter
 lr = args.lr
@@ -60,7 +65,7 @@ if not args.use_gaze_capture:
     root_data_dir = "../images"
     tablet_gaze_data = datasets.ImageFolder(root_data_dir, transform=transform)
     tablet_gaze_train, tablet_gaze_test = data.random_split(tablet_gaze_data, [0.8, 0.2])
-    test_dataloader = data.DataLoader(tablet_gaze_test, batch_size=1)
+    test_dataloader = data.DataLoader(tablet_gaze_test, batch_size=200)
     train_dataloader = data.DataLoader(tablet_gaze_train, batch_size=batch_size, shuffle=True)
     class_to_idx = tablet_gaze_data.class_to_idx
     idx_to_class = {v: k for k, v in class_to_idx.items()}
@@ -76,11 +81,11 @@ else:
     root_data_dir = "../gaze-capture"
     gaze_capture_data = datasets.ImageFolder(root_data_dir, transform=transform)
     gaze_capture_train, gaze_capture_test = data.random_split(gaze_capture_data, [0.8, 0.2])
-    test_dataloader = data.DataLoader(gaze_capture_test, batch_size=1)
+    test_dataloader = data.DataLoader(gaze_capture_test, batch_size=200)
     train_dataloader = data.DataLoader(gaze_capture_train, batch_size=batch_size, shuffle=True)
     class_to_idx = gaze_capture_data.class_to_idx
     idx_to_class = {v: k for k, v in class_to_idx.items()}
-    max_vals = (19.090625, 25.3815624)
+    max_vals = (26.37, 20.5)
 
 
 def cosine_decay(optimizer, global_step, max_steps, initial_lr, final_lr=0.0):
@@ -94,13 +99,15 @@ def cosine_decay(optimizer, global_step, max_steps, initial_lr, final_lr=0.0):
 
 def convert_label(label_idxs):
     label_arr = []
+    orientation_arr = []
     for label_idx in label_idxs:
         raw_label = idx_to_class[label_idx.item()].split("_")
-        x, y = float(raw_label[0]), float(raw_label[1])
+        x, y, = float(raw_label[0]), float(raw_label[1])
         label_i = (x, y)
+        orientation_arr.append(float(raw_label[2]))
         label_arr.append(label_i)
     # Normalize labels by dividing them by the max value
-    return torch.tensor(label_arr) / torch.tensor(max_vals)
+    return torch.tensor(label_arr) / torch.tensor(max_vals), torch.tensor(orientation_arr).view(len(orientation_arr), 1)
 
 def get_face_landmarks(image):
     landmarks = []
@@ -133,13 +140,14 @@ def train():
     try:
         for epoch in range(epochs):
             for i, batch in enumerate(tqdm(train_dataloader)):
-                epochs_arr.append(i)
+                epochs_arr.append(i + epoch * len(train_dataloader))
                 image, label_idxs = batch[0], batch[1]
-                label = convert_label(label_idxs).to(mps_device)
+                label, orientation = convert_label(label_idxs)
+                label, orientation = label.to(mps_device), orientation.to(mps_device)
                 landmarks = get_face_landmarks(image)
                 if landmarks.shape[0] == batch_size:
                     landmarks = landmarks.view(batch_size, 3, 478).to(mps_device)
-                    y_pred = net(image.to(mps_device), landmarks.float())
+                    y_pred = net(image.to(mps_device), landmarks.float(), orientation=orientation)
                     loss = loss_fn(y_pred, label)
                     label_denorm, y_pred_denorm = label * torch.tensor(max_vals).to(mps_device), y_pred * torch.tensor(max_vals).to(mps_device)
                     optimizer.zero_grad()
@@ -164,9 +172,12 @@ def euclidean_distance(x, y):
 
 def avg_euclidean_distance(preds, labels):
     sum = 0
+    n = 0
     for i,  j, in zip(preds, labels):
-        sum += euclidean_distance(j, i)
-    return sum / len(preds) 
+        for z in range(i.shape[0]):
+            sum += euclidean_distance(j[z], i[z])
+            n += 1
+    return sum / n
 
 
 
@@ -175,14 +186,15 @@ def test():
     epochs_arr = []
     preds = []
     labels = []
-    batch_size = 1
+    batch_size = 200
     try:
         for i, (image, label_idxs) in enumerate(tqdm(test_dataloader)):
             epochs_arr.append(i)
-            label = convert_label(label_idxs).to(mps_device)
+            label, orientation = convert_label(label_idxs)
+            label, orientation = label.to(mps_device), orientation.to(mps_device)
             landmarks = get_face_landmarks(image).to(mps_device, dtype=torch.float32)
-            landmarks = landmarks.view(batch_size, 3, 478)
-            y_pred = net(image.to(mps_device), landmarks)
+            landmarks = landmarks.view(landmarks.shape[0], 3, 478)
+            y_pred = net(image.to(mps_device), landmarks, orientation=orientation)
             loss = loss_fn(y_pred, label)
             preds.append(y_pred * torch.tensor(max_vals).to(mps_device))
             labels.append(label * torch.tensor(max_vals).to(mps_device))
@@ -207,13 +219,9 @@ def main():
     if(len(epochs_arr) == len(losses)):
         plt.plot(epochs_arr, losses)
         plt.show()
-        plt.plot(test_epochs, test_losses)
-        plt.show()
     else:
-        epochs_arr.pop()
+        epochs_arr = epochs_arr[:len(losses)]
         plt.plot(epochs_arr, losses)
         plt.show()
-        plt.plot(test_epochs, test_losses)
-        plt.show() 
 if __name__ == "__main__":
     main()

@@ -9,7 +9,7 @@ class GazeCapture(data.Dataset):
         self.process_gaze_capture()
         print(self.get_max_and_min())
 
-    def process_folder(self, dir_name):
+    def process_folder_rel_coords(self, dir_name):
         frames_path = os.path.join(dir_name, "frames")
         json_path = os.path.join(dir_name, "dotInfo.json")
         screen_info_path = os.path.join(dir_name, "screen.json")
@@ -32,16 +32,34 @@ class GazeCapture(data.Dataset):
             height, width, orientation = heights[i], widths[i], orientations[i]
             X_cm = x_pts[i] / width * w_mm / 10
             Y_cm = y_pts[i] / height * h_mm / 10
-            label = str(X_cm) + "_" + str(Y_cm)
+            label = str(X_cm)[:6] + "_" + str(Y_cm)[:6]
             directory = os.path.join(self.save_dir, label)
             if not os.path.exists(directory):
                 os.makedirs(directory)
             shutil.copy(os.path.join(frames_path, image_path), os.path.join(directory, image_path))
         
-    
+    def process_folder(self, dir_name):
+        frames_path = os.path.join(dir_name, "frames")
+        screen_info_path = os.path.join(dir_name, "screen.json")
+        json_path = os.path.join(dir_name, "dotInfo.json")
+        f = open(json_path)
+        data = json.load(f)
+        x_pts = data['XCam']
+        y_pts = data['YCam']
+        f.close()
+        f = open(screen_info_path)
+        info = json.load(f)
+        orientations = info["Orientation"]
+        f.close()
+        for i, image_path in enumerate(os.listdir(frames_path)):
+            label = str(x_pts[i])[:6] + "_" + str(y_pts[i])[:6] + "_" + str(orientations[i])
+            directory = os.path.join(self.save_dir, label)
+            if not os.path.exists(directory):
+                os.makedirs(directory)
+            shutil.copy(os.path.join(frames_path, image_path), os.path.join(directory, image_path)) 
     def process_gaze_capture(self):
-        for subject in os.listdir(self.root_dir):
-            if subject[0] != ".":
+        for i, subject in enumerate(os.listdir(self.root_dir)):
+            if subject[0] != "." and i < len(os.listdir(self.root_dir) )/ 6:
                 self.process_folder(os.path.join(self.root_dir, subject))
     
     def get_max_and_min(self):
