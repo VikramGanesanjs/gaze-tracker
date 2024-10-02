@@ -20,15 +20,7 @@
 https://docs.google.com/presentation/d/e/2PACX-1vT31BkkXtEETUB4jZlFkJaHxrtIWq4od2WNtv4lVFZEgALAo8zvMprMnpUUFtvI3A/pub?start=false&loop=false&delayms=3000
 
 # Project Video
-Not currently finished
+https://drive.google.com/file/d/1UT8_yvZybitpa0mOBOIj3uzyzgXi8jBo/view?usp=sharing
 
 
-# Instructions to Run on Own Machine
-
-1. Clone the repository
-2. It is recommended to download the GazeCapture dataset for best results.
-3. Once this is downloaded, run gaze_capture_setup.py, replacing the root_dir and the save_dir in the file with wherever you want to save the dataset (outside the repo)
-4. Create a directory called saved models outside of the cloned repo
-5. If the machine is not an Apple Silicon Macbook, you will need to delete every instance of mps_device in train.py and train the model on a cpu or cuda
-6. 
 
